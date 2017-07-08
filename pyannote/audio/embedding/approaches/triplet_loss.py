@@ -28,6 +28,7 @@
 
 
 from ..base import SequenceEmbedding
+from ..generators import get_sequence_generator
 from autograd import numpy as ag_np
 from autograd import value_and_grad
 
@@ -85,59 +86,56 @@ class TripletLoss(SequenceEmbedding):
         self.learn_to_aggregate = learn_to_aggregate
         super(TripletLoss, self).__init__(**kwargs)
 
-    def get_batch_generator(self, data_h5):
-        if self.learn_to_aggregate:
-            return self._get_batch_generator_z(data_h5)
-        else:
-            return self._get_batch_generator_y(data_h5)
-
-    def _get_batch_generator_y(self, data_h5):
-        """Get batch generator
+    def get_batch_generator(self, files, duration=3.2, heterogeneous=False,
+                            **kwargs):
+        """
 
         Parameters
         ----------
-        data_h5 : str
-            Path to HDF5 file containing precomputed sequences.
-            It must have to aligned datasets 'X' and 'y'.
+        files: iterable
 
         Returns
         -------
-        batch_generator : iterable
-        batches_per_epoch : int
-        n_classes : int
+        {
+            batch_generator : iterable
+            batches_per_epoch : int
+            n_classes : int
+        }
+
         """
+        if self.learn_to_aggregate:
+            return self._get_batch_generator_z(files, duration=duration,
+                                               heterogeneous=heterogeneous)
+        else:
+            return self._get_batch_generator_y(files, duration=duration,
+                                               heterogeneous=heterogeneous)
 
-        fp = h5py.File(data_h5, mode='r')
-        h5_X = fp['X']
-        h5_y = fp['y']
+    def _get_batch_generator_y(self, corpus, duration=3.2, heterogeneous=False):
 
-        # keep track of number of labels and rename labels to integers
-        unique, y = np.unique(h5_y, return_inverse=True)
-        n_classes = len(unique)
+        if heterogeneous:
+            raise ValueError(
+                'heterogeneous sequence generator is not supported yet')
 
-        index_generator = random_label_index(
-            y, per_label=self.per_label, return_label=False)
+        generator = get_sequence_generator(
+            corpus, per_label=self.per_label,
+            duration=duration, heterogeneous=heterogeneous
+            feature_extraction=self.feature_extraction_)
 
-        def generator():
-            while True:
-                i = next(index_generator)
-                yield {'X': h5_X[i], 'y': y[i]}
-
-        signature = {'X': {'type': 'ndarray'},
-                     'y': {'type': 'ndarray'}}
         batch_size = self.per_batch * self.per_fold * self.per_label
-        batch_generator = batchify(generator(), signature,
+        batch_generator = batchify(generator, generator.signature,
                                    batch_size=batch_size)
 
-        batches_per_epoch = n_classes // (self.per_batch * self.per_fold) + 1
+        batches_per_epoch = generator.n_classes // (self.per_batch * self.per_fold) + 1
 
         return {'batch_generator': batch_generator,
                 'batches_per_epoch': batches_per_epoch,
-                'n_classes': n_classes,
-                'classes': unique}
+                'n_classes': generator.n_classes,
+                'classes': generator.classes}
 
     def _get_batch_generator_z(self, data_h5):
         """"""
+
+        raise NotImplementedError('FIXME')
 
         fp = h5py.File(data_h5, mode='r')
         h5_X = fp['X']
